@@ -3872,6 +3872,12 @@ CASINO_RANKS = [
     ('Top Tier',  4,   8_000_000,    5_000.00,   '👑'),
     ('Top Tier',  5,  10_000_000,    5_000.00,   '👑'),
 ]
+# Rank icons are loaded from the owner's custom emoji pack. Do not expose the
+# legacy per-tier emoji values through older rank helpers or generated labels.
+CASINO_RANKS = [
+    (tier, sub, threshold, bonus, "")
+    for tier, sub, threshold, bonus, _legacy_emoji in CASINO_RANKS
+]
 _CR_SUB = ['I', 'II', 'III', 'IV', 'V']
 LEVEL_SYSTEM = {
     i: {
@@ -9764,7 +9770,15 @@ async def handle_games_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 # ── Premium custom-emoji packs ─────────────────────────────────────────────
 RAIKA_RANK_PACK_NAME = "RaikaRanks"
-RANK_EMOJI_PACK_TITLE = "Rollers Emoji Pack"
+RANK_EMOJI_PACK_TITLE = "@therollerscasino Ranks"
+RANK_EMOJI_PACK_NAME_PREFIX = "therollerscasino_ranks"
+
+
+def _rank_emoji_pack_name(bot_username: str) -> str:
+    """Return the Telegram-compatible short name for this bot's rank pack."""
+    return f"{RANK_EMOJI_PACK_NAME_PREFIX}_by_{bot_username}".lower()
+
+
 DIAMOND_GAME_EMOJI_PACK_NAME = (
     "ST_5PUsQEHbxN5l8Vy2fX6sGtMS_QszrcOUd9xfUjno_by_StickersPackRobot"
 )
@@ -9976,7 +9990,12 @@ async def _load_custom_emoji_pack(bot) -> None:
             for st in stickers_raw:
                 ce_id = st.get("custom_emoji_id")
                 alt   = st.get("emoji")
-                if pack == "RollersProgressBar_by_CheakLeaksBot" and ce_id:
+                if (
+                    pack == "RollersProgressBar_by_CheakLeaksBot"
+                    and ce_id
+                    and not st.get("is_animated")
+                    and not st.get("is_video")
+                ):
                     _PROGRESS_BAR_STICKERS.append(ce_id)
                 if pack == "rollerscasino_by_rollersgamebot" and alt in _RC_MASCOT_EMOJI:
                     continue
@@ -10055,34 +10074,32 @@ async def _load_custom_emoji_pack(bot) -> None:
             f"[rank emojis] Applied {_applied_rank_count} IDs from "
             f"{RAIKA_RANK_PACK_NAME}; unfilled ranks use Unicode fallbacks"
         )
-        # Prefer the owner's copy after it has been created, so rank displays
-        # continue using the new pack after a bot restart.
-        try:
-            _bot_info = await bot.get_me()
-            if _bot_info.username:
-                _rank_copy_name = (
-                    f"rollers_emoji_pack_by_{_bot_info.username}".lower()
+    # Prefer the owner's copy after it has been created, so rank displays
+    # continue using the new pack after a bot restart.
+    try:
+        _bot_info = await bot.get_me()
+        if _bot_info.username:
+            _rank_copy_name = _rank_emoji_pack_name(_bot_info.username)
+            async with _hx.AsyncClient(timeout=15) as _rank_client:
+                _rank_response = await _rank_client.get(
+                    f"https://api.telegram.org/bot{bot.token}/getStickerSet",
+                    params={"name": _rank_copy_name},
                 )
-                async with _hx.AsyncClient(timeout=15) as _rank_client:
-                    _rank_response = await _rank_client.get(
-                        f"https://api.telegram.org/bot{bot.token}/getStickerSet",
-                        params={"name": _rank_copy_name},
-                    )
-                _rank_data = _rank_response.json()
-                if _rank_data.get("ok"):
-                    _rank_copy_stickers = _rank_data["result"].get("stickers", [])
-                    _copy_count = _apply_rank_custom_emoji_stickers(
-                        _rank_copy_stickers
-                    )
-                    logger.info(
-                        f"[rank emojis] Preferred owner copy {_rank_copy_name}; "
-                        f"loaded {_copy_count} tier emojis"
-                    )
-        except Exception as _rank_copy_error:
-            logger.debug(
-                f"[rank emojis] Owner copy not available; keeping "
-                f"{RAIKA_RANK_PACK_NAME} ({type(_rank_copy_error).__name__})"
-            )
+            _rank_data = _rank_response.json()
+            if _rank_data.get("ok"):
+                _rank_copy_stickers = _rank_data["result"].get("stickers", [])
+                _copy_count = _apply_rank_custom_emoji_stickers(
+                    _rank_copy_stickers
+                )
+                logger.info(
+                    f"[rank emojis] Preferred owner copy {_rank_copy_name}; "
+                    f"loaded {_copy_count} tier emojis"
+                )
+    except Exception as _rank_copy_error:
+        logger.debug(
+            f"[rank emojis] Owner copy not available; keeping "
+            f"{RAIKA_RANK_PACK_NAME} ({type(_rank_copy_error).__name__})"
+        )
     if diamond_game_pack_stickers:
         _apply_diamond_game_custom_emoji_stickers(diamond_game_pack_stickers)
     # Only the public Rollers Casino pack is allowed to drive user-facing
@@ -13822,16 +13839,25 @@ def _bonus_progress_bar(user_id: str) -> tuple[str, float, float]:
     progress = 1.0 if current_idx >= len(CASINO_RANKS) - 1 else max(
         0.0, min(1.0, (total - current_threshold) / span)
     )
-    filled = int(round(progress * 10))
     if _PROGRESS_BAR_STICKERS:
-        bar = "".join(
-            f'<tg-emoji emoji-id="{_PROGRESS_BAR_STICKERS[min(i, len(_PROGRESS_BAR_STICKERS) - 1)]}">🟩</tg-emoji>'
-            if i < filled else "▫️"
-            for i in range(10)
+        bar_index = min(
+            len(_PROGRESS_BAR_STICKERS) - 1,
+            max(0, int(round(progress * (len(_PROGRESS_BAR_STICKERS) - 1)))),
+        )
+        bar = (
+            f'<tg-emoji emoji-id="{_PROGRESS_BAR_STICKERS[bar_index]}">'
+            "▰</tg-emoji>"
         )
     else:
-        bar = "🟩" * filled + "▫️" * (10 - filled)
-    return bar, total, max(0.0, next_threshold - total)
+        filled = int(round(progress * 10))
+        bar = "▓" * filled + "░" * (10 - filled)
+    next_idx = min(current_idx + 1, len(CASINO_RANKS) - 1)
+    connected_bar = (
+        f"{get_rank_custom_emoji_tag(current_idx)} "
+        f"{bar} "
+        f"{get_rank_custom_emoji_tag(next_idx)}"
+    )
+    return connected_bar, total, max(0.0, next_threshold - total)
 
 
 _CRYPTO_BONUS_BANNER_PATH = CASINO_UI_ASSETS["crypto_bonus"]
@@ -14590,91 +14616,15 @@ async def handle_bonus_weekly(query, context: ContextTypes.DEFAULT_TYPE) -> None
         )
 
 async def handle_bonus_levelup(query, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show level-up bonus with new rank system."""
-    user_id = str(query.from_user.id)
-    user_currency = get_user_currency(user_id)
+    """Show the shared rank-details view from the Bonus menu."""
+    await _show_rank_details(query, context)
 
-    current_idx = get_user_level(user_id)
-    total_wagered = max(
-        user_wagering_totals.get(user_id, 0.0),
-        user_wagered_amount.get(user_id, 0.0),
-    )
-
-    tier, sub, curr_thresh, curr_bonus, emoji = CASINO_RANKS[current_idx]
-    rank_name = f"{get_rank_custom_emoji_tag(current_idx)} {tier} {_CR_SUB[sub-1]}"
-
-    is_max = current_idx >= len(CASINO_RANKS) - 1
-    if not is_max:
-        next_tier, next_sub, next_thresh, next_bonus, next_emoji = CASINO_RANKS[current_idx + 1]
-        next_rank_name = f"{get_rank_custom_emoji_tag(current_idx + 1)} {next_tier} {_CR_SUB[next_sub-1]}"
-        wager_needed = max(0.0, next_thresh - total_wagered)
-    else:
-        next_rank_name = rank_name
-        next_thresh = curr_thresh
-        wager_needed = 0.0
-
-    ranking = sum(1 for uid, w in user_wagering_totals.items() if w > total_wagered) + 1
-
-    last_claimed = user_level_bonus_claimed.get(user_id, -1)
-    # User must have actually wagered >= the current rank's threshold before claiming its bonus
-    can_claim = (current_idx > last_claimed) and not is_max and (total_wagered >= curr_thresh)
-
-    bonus_amount = curr_bonus
-    bonus_formatted = format_balance_in_currency(bonus_amount, user_currency)
-
-    if is_max:
-        next_level_line = f"\nNext Level:\n<b>{next_rank_name}</b> — Maximum reached!\n"
-        wager_line = "👑 <b>You have reached the highest rank!</b>"
-    else:
-        next_level_line = f"\nNext Level:\n<b>{next_rank_name}</b> — ${next_thresh:,} wagered\n"
-        wager_line = f"You are ranked <b>#{ranking}</b>.\nWager <b>${wager_needed:,.0f}</b> more to upgrade your level!"
-
-    text = (
-        f"🌲 <b>Level Up Bonus</b>\n\n"
-        f"Play games, level up and get even more bonuses!\n\n"
-        f"Your current level:\n"
-        f"<b>{rank_name}</b> — ${total_wagered:,.0f} wagered"
-        f"{next_level_line}\n"
-        f"{wager_line}"
-    )
-
-    if can_claim:
-        claim_btn = _bonus_button(
-            f"Claim {bonus_formatted} Bonus",
-            "bonus_levelup_claim",
-            "🎁",
-            "success",
-        )
-    else:
-        claim_btn = _bonus_button(
-            f"Claim {bonus_formatted} Bonus",
-            "noop",
-            "🔒",
-            "primary",
-        )
-
-    keyboard = [
-        [claim_btn],
-        [_bonus_button("Levels List", "bonus_levels_list", "📈", "primary")],
-        [_bonus_button("Back", "bonus_back", "⬅️", "danger")],
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    try:
-        await query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    except Exception:
-        try:
-            await query.message.delete()
-        except Exception:
-            pass
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=text,
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.HTML,
-        )
-
-def _build_rank_tier_page(tier_name: str, user_wagered: float) -> tuple:
+def _build_rank_tier_page(
+    tier_name: str,
+    user_wagered: float,
+    back_callback: str = "bonus_levelup",
+    callback_prefix: str = "rank_tier_",
+) -> tuple:
     """Build the text + keyboard for a rank tier page.
     Returns (text, reply_markup).
     """
@@ -14699,14 +14649,20 @@ def _build_rank_tier_page(tier_name: str, user_wagered: float) -> tuple:
 
     nav_row = []
     if prev_tier:
-        nav_row.append(InlineKeyboardButton(f"⬅️ {prev_tier}", callback_data=f"rank_tier_{prev_tier.replace(' ', '_')}"))
+        nav_row.append(InlineKeyboardButton(
+            f"⬅️ {prev_tier}",
+            callback_data=f"{callback_prefix}{prev_tier.replace(' ', '_')}",
+        ))
     if next_tier:
-        nav_row.append(InlineKeyboardButton(f"{next_tier} ➡️", callback_data=f"rank_tier_{next_tier.replace(' ', '_')}"))
+        nav_row.append(InlineKeyboardButton(
+            f"{next_tier} ➡️",
+            callback_data=f"{callback_prefix}{next_tier.replace(' ', '_')}",
+        ))
 
     keyboard = []
     if nav_row:
         keyboard.append(nav_row)
-    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data="bonus_levelup")])
+    keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=back_callback)])
 
     return text, InlineKeyboardMarkup(keyboard)
 
@@ -17479,8 +17435,8 @@ async def weekly_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 def get_rank_info(rank_idx):
     """Return (rank_name, emoji) for a given CASINO_RANKS index."""
     idx = max(0, min(rank_idx, len(CASINO_RANKS) - 1))
-    tier, sub, threshold, bonus, emoji = CASINO_RANKS[idx]
-    return f"{tier} {_CR_SUB[sub-1]}", emoji
+    tier, sub, threshold, bonus, _legacy_emoji = CASINO_RANKS[idx]
+    return f"{tier} {_CR_SUB[sub-1]}", get_rank_custom_emoji_tag(idx)
 
 # ── Rank custom emoji pack (RaikaRanks) ─────────────────────────────────────
 # 14 entries — one per tier, indexed by (rank_idx // 5). IDs are loaded from
@@ -17501,6 +17457,9 @@ RANK_TIER_CUSTOM_EMOJI: list = [
     ('✨', ''),   # 12 Ethereal
     ('🏆', ''),   # 13 Top Tier
 ]
+# The old per-tier glyphs above are retained only as historical source data.
+# Use a neutral fallback until the new custom pack has loaded.
+RANK_TIER_CUSTOM_EMOJI = [('🏅', '') for _ in range(14)]
 
 # Tier ring colours for image generation (PIL RGB tuples)
 RANK_TIER_COLORS: list = [
@@ -17527,6 +17486,41 @@ def get_rank_custom_emoji_tag(rank_idx: int) -> str:
     if not ce_id:
         return plain
     return f'<tg-emoji emoji-id="{ce_id}">{plain}</tg-emoji>'
+
+
+def _rank_static_emoji_id(symbol: str) -> str | None:
+    """Resolve only static emoji IDs from the user's Rollers Casino pack."""
+    normalized = symbol.replace("\ufe0f", "")
+    for candidate in (symbol, normalized, normalized + "\ufe0f"):
+        emoji_id = _ROLLERS_STATIC_EMOJI_MAP.get(candidate)
+        if emoji_id:
+            return emoji_id
+    return None
+
+
+def _rank_static_emoji_tag(symbol: str) -> str:
+    """Render a static Rollers emoji, never an animated pack fallback."""
+    emoji_id = _rank_static_emoji_id(symbol)
+    if not emoji_id:
+        return symbol
+    return f'<tg-emoji emoji-id="{emoji_id}">{symbol}</tg-emoji>'
+
+
+def _rank_action_button(
+    label: str, callback_data: str, symbol: str = "", kind: str = "primary"
+):
+    """Build a rank-screen button using only static Rollers emoji IDs."""
+    factory = {
+        "success": success_btn,
+        "danger": danger_btn,
+    }.get(kind, primary_btn)
+    emoji_id = _rank_static_emoji_id(symbol) if symbol else None
+    visible_label = label if emoji_id or not symbol else f"{symbol} {label}"
+    return factory(
+        visible_label,
+        callback_data=callback_data,
+        icon_custom_emoji_id=emoji_id,
+    )
 
 
 async def clone_rank_emoji_pack_command(
@@ -17570,7 +17564,7 @@ async def clone_rank_emoji_pack_command(
             bot_username = bot_info.get("username")
             if not bot_username:
                 raise RuntimeError("Telegram did not return the bot username.")
-            pack_name = f"rollers_rank_emoji_by_{bot_username}".lower()
+            pack_name = _rank_emoji_pack_name(bot_username)
 
             try:
                 pack = await telegram_call("getStickerSet", {"name": pack_name})
@@ -17592,9 +17586,10 @@ async def clone_rank_emoji_pack_command(
                         "RaikaRanks has more than Telegram's 200-sticker custom emoji limit."
                     )
 
+                first_sticker = source_stickers[0]
                 sticker_format = (
-                    "animated" if source.get("is_animated")
-                    else "video" if source.get("is_video")
+                    "animated" if first_sticker.get("is_animated")
+                    else "video" if first_sticker.get("is_video")
                     else "static"
                 )
                 input_stickers = [
@@ -18359,8 +18354,120 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
+def _rank_details_screen(user_id: str, username: str = "") -> tuple[str, InlineKeyboardMarkup]:
+    """Build the /rank details card using rank-pack badges and static UI emojis."""
+    uid = str(user_id)
+    current_idx = max(0, min(get_user_level(uid), len(CASINO_RANKS) - 1))
+    total_wagered = max(
+        user_wagering_totals.get(uid, 0.0),
+        user_wagered_amount.get(uid, 0.0),
+    )
+    current_tier, current_sub, current_threshold, current_bonus, _ = CASINO_RANKS[current_idx]
+    current_name = f"{current_tier} {_CR_SUB[current_sub - 1]}"
+    current_tag = get_rank_custom_emoji_tag(current_idx)
+    is_max = current_idx >= len(CASINO_RANKS) - 1
+    next_idx = current_idx if is_max else current_idx + 1
+    next_tier, next_sub, next_threshold, next_bonus, _ = CASINO_RANKS[next_idx]
+    next_name = f"{next_tier} {_CR_SUB[next_sub - 1]}"
+    next_tag = get_rank_custom_emoji_tag(next_idx)
+    bonus_rank_name = current_name if is_max else next_name
+    bonus_rank_tag = current_tag if is_max else next_tag
+    bonus_amount = current_bonus if is_max else next_bonus
+    currency = get_user_currency(uid)
+    progress_line, _, remaining = _bonus_progress_bar(uid)
+
+    last_claimed = user_level_bonus_claimed.get(uid, -1)
+    can_claim = (
+        current_idx > last_claimed
+        and total_wagered >= current_threshold
+    )
+    claim_icon = "🎁" if can_claim else "🔒"
+    claim_callback = "bonus_levelup_claim" if can_claim else "noop"
+    claim_kind = "success" if can_claim else "primary"
+
+    text = (
+        f"{_rank_static_emoji_tag('🏅')} <b>Rank Details</b>\n\n"
+        f"Rank: {current_tag} <b>{current_name}</b>\n"
+    )
+    if is_max:
+        text += "Next rank: <b>Maximum rank reached</b>\n\n"
+    else:
+        text += f"Next rank: {next_tag} <b>{next_name}</b>\n\n"
+
+    text += (
+        f"{bonus_rank_tag} <b>{bonus_rank_name} Bonuses:</b>\n"
+        f"{_rank_static_emoji_tag('💰')} <i>Bonus:</i> "
+        f"<b>{format_balance_in_currency(bonus_amount, currency)}</b>\n"
+    )
+    if "rollers" in (username or "").lower():
+        text += (
+            f"{_rank_static_emoji_tag('✨')} "
+            "<i>Extra 10% added to weekly bonus</i>\n"
+        )
+    text += "\n"
+
+    text += f"{progress_line}\n"
+    if is_max:
+        text += "<b>Maximum rank reached</b>"
+    else:
+        text += (
+            f"{_rank_static_emoji_tag('📈')} Remaining until rank up: "
+            f"<b>{format_balance_in_currency(remaining, currency)}</b>"
+        )
+
+    keyboard = [
+        [_rank_action_button("Claim bonus", claim_callback, claim_icon, claim_kind)],
+        [InlineKeyboardButton("Rank List", callback_data="rank_list")],
+        [_rank_action_button("Back", "back_to_menu", "⬅️", "danger")],
+    ]
+    return text, InlineKeyboardMarkup(keyboard)
+
+
+async def _show_rank_details(query, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Edit the current callback message to show the shared rank details card."""
+    if not query or not query.from_user:
+        return
+    user = query.from_user
+    username = user.username or user.first_name or ""
+    text, reply_markup = _rank_details_screen(str(user.id), username)
+    try:
+        await query.edit_message_text(
+            text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML,
+        )
+    except Exception:
+        if not query.message:
+            return
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML,
+        )
+
+
+async def rank_details_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the player's current rank, next-rank bonus, and progress bar."""
+    user = update.effective_user
+    message = update.effective_message
+    if not user or not message:
+        return
+    username = user.username or user.first_name or ""
+    text, reply_markup = _rank_details_screen(str(user.id), username)
+    await message.reply_text(
+        text,
+        reply_markup=reply_markup,
+        parse_mode=ParseMode.HTML,
+    )
+
+
 async def ranks_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show /rank — paginated tier view (5 levels per tier) with navigation buttons."""
+    """Show /ranks — paginated tier view (5 levels per tier)."""
     if not update.message or not update.message.from_user:
         return
 
@@ -27506,7 +27613,51 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 pass
         finally:
             _processing_levelup_bonus.discard(user_id)
-        await handle_bonus_levelup(query, context)
+        await _show_rank_details(query, context)
+    elif query.data == "rank_details":
+        await _show_rank_details(query, context)
+    elif query.data == "rank_list":
+        current_idx_list = get_user_level(user_id)
+        current_tier_list = CASINO_RANKS[current_idx_list][0]
+        total_wagered_list = max(
+            user_wagering_totals.get(user_id, 0.0),
+            user_wagered_amount.get(user_id, 0.0),
+        )
+        text_list, markup_list = _build_rank_tier_page(
+            current_tier_list,
+            total_wagered_list,
+            back_callback="rank_details",
+            callback_prefix="rank_tier_rank_",
+        )
+        await query.edit_message_text(
+            text_list,
+            reply_markup=markup_list,
+            parse_mode=ParseMode.HTML,
+        )
+    elif query.data.startswith("rank_tier_rank_"):
+        tier_raw = query.data[len("rank_tier_rank_"):]
+        tier_name = tier_raw.replace("_", " ")
+        if tier_name not in _TIER_ORDER:
+            try:
+                await query.answer("Unknown tier", show_alert=True)
+            except Exception:
+                pass
+            return
+        total_wagered_cb = max(
+            user_wagering_totals.get(user_id, 0.0),
+            user_wagered_amount.get(user_id, 0.0),
+        )
+        text_cb, markup_cb = _build_rank_tier_page(
+            tier_name,
+            total_wagered_cb,
+            back_callback="rank_details",
+            callback_prefix="rank_tier_rank_",
+        )
+        await query.edit_message_text(
+            text_cb,
+            reply_markup=markup_cb,
+            parse_mode=ParseMode.HTML,
+        )
     elif query.data.startswith("rank_tier_"):
         tier_raw = query.data[len("rank_tier_"):]
         tier_name = tier_raw.replace("_", " ")
@@ -40454,7 +40605,8 @@ async def set_commands(app):
         BotCommand("matches",      "📋 Match history"),
         BotCommand("streak",       "🔥 Your win streak"),
         BotCommand("levels",       "🏆 Your level & XP"),
-        BotCommand("ranks",        "🏅 Player ranks"),
+        BotCommand("rank",         "🏅 Your rank details"),
+        BotCommand("ranks",        "📋 Rank list"),
         BotCommand("ref",          "🤝 Referral system"),
         BotCommand("leaderboard",  "🏆 View leaderboard"),
         BotCommand("rakeback",     "💸 Claim rakeback"),
@@ -46235,6 +46387,7 @@ def main():
     application.add_handler(CommandHandler("custody", custody_command))
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("clonerankemoji", clone_rank_emoji_pack_command))
+    application.add_handler(CommandHandler("rank", rank_details_command))
     application.add_handler(CommandHandler("ranks", ranks_command))
     application.add_handler(CommandHandler("weekly", weekly_command))
     application.add_handler(CommandHandler("profile", profile_command))
@@ -46448,7 +46601,8 @@ def main():
         BotCommand("matches",      "📋 Match history"),
         BotCommand("streak",       "🔥 Your win streak"),
         BotCommand("levels",       "🏆 Your level & XP"),
-        BotCommand("ranks",        "🏅 Player ranks"),
+        BotCommand("rank",         "🏅 Your rank details"),
+        BotCommand("ranks",        "📋 Rank list"),
         # ── Rewards & Social ─────────────────────────────────────────────
         BotCommand("ref",          "🤝 Referral system"),
         BotCommand("leaderboard",  "🏆 View leaderboard"),
