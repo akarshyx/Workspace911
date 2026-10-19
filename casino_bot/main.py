@@ -19567,15 +19567,23 @@ async def _rps_play(context, chat_id: int, user_id: str, username: str,
     _bot_plain = _rps_plain.get(bot_choice, '✊')
     _mult_line = f"\n{_mult_em} Multiplier: <b>{int(multiplier)}x</b>" if result == 'win' else ""
 
-    full_text = (
-        f"{_you_plain} <b>You:</b>  {choice.title()}\n"
-        f"{_bot_plain} <b>Bot:</b>  {bot_choice.title()}\n\n"
-        f"{jackpot_tag + chr(10) if jackpot_tag else ''}"
-        f"<b>{result_icons[result]}</b>{_mult_line}\n"
-        f"{_bet_em} Bet: <b>{format_balance_in_currency(bet_amount, user_currency)}</b>\n"
-        f"{_bal_em} Balance: <b>{format_balance_in_currency(curr_bal, user_currency)}</b>\n"
-        f"{payout_display}"
-    )
+    if result == 'win':
+        full_text = (
+            f"{jackpot_tag + chr(10) if jackpot_tag else ''}"
+            f"{_won_em} <b>You won {format_balance_in_currency(winnings, user_currency)}</b>\n"
+            f"{_bal_em} Current coin balance: "
+            f"<b>{format_balance_in_currency(curr_bal, user_currency)}</b>"
+        )
+    else:
+        full_text = (
+            f"{_you_plain} <b>You:</b>  {choice.title()}\n"
+            f"{_bot_plain} <b>Bot:</b>  {bot_choice.title()}\n\n"
+            f"{jackpot_tag + chr(10) if jackpot_tag else ''}"
+            f"<b>{result_icons[result]}</b>{_mult_line}\n"
+            f"{_bet_em} Bet: <b>{format_balance_in_currency(bet_amount, user_currency)}</b>\n"
+            f"{_bal_em} Balance: <b>{format_balance_in_currency(curr_bal, user_currency)}</b>\n"
+            f"{payout_display}"
+        )
     kb = [
         [InlineKeyboardButton("🔄 Play Again", callback_data=f"rps_again_{user_id}_{bet_amount_input}")],
         [InlineKeyboardButton("📝 Change bet", callback_data=f"rps_changbet_{user_id}_{bet_amount_input}")],
@@ -19604,13 +19612,21 @@ async def _rps_play(context, chat_id: int, user_id: str, username: str,
         _register_game_msg(_rps_result_msg.message_id, user_id)
     except Exception:
         # Fallback: plain text without HTML parse mode
-        plain_text = (
-            f"{_you_plain} You: {choice.title()}\n"
-            f"{_bot_plain} Bot: {bot_choice.title()}\n\n"
-            f"{jackpot_tag + chr(10) if jackpot_tag else ''}"
-            f"{result_icons[result]}\n"
-            f"{payout_display}"
-        )
+        if result == 'win':
+            plain_text = (
+                f"{jackpot_tag + chr(10) if jackpot_tag else ''}"
+                f"🏆 You won {format_balance_in_currency(winnings, user_currency)}\n"
+                f"🪙 Current coin balance: "
+                f"{format_balance_in_currency(curr_bal, user_currency)}"
+            )
+        else:
+            plain_text = (
+                f"{_you_plain} You: {choice.title()}\n"
+                f"{_bot_plain} Bot: {bot_choice.title()}\n\n"
+                f"{jackpot_tag + chr(10) if jackpot_tag else ''}"
+                f"{result_icons[result]}\n"
+                f"{payout_display}"
+            )
         _rps_result_msg = await context.bot.send_message(
             chat_id, plain_text,
             reply_markup=InlineKeyboardMarkup(kb)
@@ -22886,9 +22902,8 @@ async def handle_dr2_play_cb(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             f'<tg-emoji emoji-id="5262465519021222767">⬆️</tg-emoji> <b>Game ended</b>\n\n'
             f'<tg-emoji emoji-id="5303365101011619922">🎯</tg-emoji> <b>Selected: {" ".join(sel_names)}</b>\n'
             f'<tg-emoji emoji-id="5316896163549422788">✅</tg-emoji> <b>Result: {result_name}</b>\n\n'
-            f'🎲 <b>Multiplier: ×{multiplier:.2f}</b>\n'
             f'<tg-emoji emoji-id="5415738595279394616">🏆</tg-emoji> <b>Winnings: {win_fmt}</b>\n'
-            f'<tg-emoji emoji-id="6053003027793578665">💼</tg-emoji> <b>Balance: {new_bal_fmt}</b>'
+            f'<tg-emoji emoji-id="6053003027793578665">💼</tg-emoji> <b>Current coin balance: {new_bal_fmt}</b>'
         )
     else:
         add_house_balance(bet)
@@ -22900,7 +22915,7 @@ async def handle_dr2_play_cb(query, context: ContextTypes.DEFAULT_TYPE) -> None:
             f'<tg-emoji emoji-id="5303365101011619922">🎯</tg-emoji> <b>Selected: {" ".join(sel_names)}</b>\n'
             f'<tg-emoji emoji-id="5215697242177939628">❌</tg-emoji> <b>Result: {result_name}</b>\n\n'
             f'<tg-emoji emoji-id="5415738595279394616">🏆</tg-emoji> <b>Winnings: 0.00</b>\n'
-            f'<tg-emoji emoji-id="6053003027793578665">💼</tg-emoji> <b>Balance: {new_bal_fmt}</b>'
+            f'<tg-emoji emoji-id="6053003027793578665">💼</tg-emoji> <b>Current coin balance: {new_bal_fmt}</b>'
         )
 
     save_data()
@@ -22961,9 +22976,8 @@ async def _dr_resolve_roll(update: Update, context: ContextTypes.DEFAULT_TYPE, p
             f'<tg-emoji emoji-id="5262465519021222767">⬆️</tg-emoji> <b>Game ended</b>\n\n'
             f'<tg-emoji emoji-id="5303365101011619922">🎯</tg-emoji> <b>Selected: {" ".join(sel_names)}</b>\n'
             f'<tg-emoji emoji-id="{result_id}">{result_icon}</tg-emoji> <b>Result: {result_name}</b>\n\n'
-            f'🎲 <b>Multiplier: ×{multiplier:.2f}</b>\n'
             f'<tg-emoji emoji-id="5415738595279394616">🏆</tg-emoji> <b>Winnings: {win_fmt}</b>\n'
-            f'<tg-emoji emoji-id="6053003027793578665">💼</tg-emoji> <b>Balance: {new_bal_fmt}</b>'
+            f'<tg-emoji emoji-id="6053003027793578665">💼</tg-emoji> <b>Current coin balance: {new_bal_fmt}</b>'
         )
     else:
         add_house_balance(bet)
@@ -22977,7 +22991,7 @@ async def _dr_resolve_roll(update: Update, context: ContextTypes.DEFAULT_TYPE, p
             f'<tg-emoji emoji-id="5303365101011619922">🎯</tg-emoji> <b>Selected: {" ".join(sel_names)}</b>\n'
             f'<tg-emoji emoji-id="{result_id}">{result_icon}</tg-emoji> <b>Result: {result_name}</b>\n\n'
             f'<tg-emoji emoji-id="5415738595279394616">🏆</tg-emoji> <b>Winnings: 0.00</b>\n'
-            f'<tg-emoji emoji-id="6053003027793578665">💼</tg-emoji> <b>Balance: {new_bal_fmt}</b>'
+            f'<tg-emoji emoji-id="6053003027793578665">💼</tg-emoji> <b>Current coin balance: {new_bal_fmt}</b>'
         )
 
     # Drop the roll keyboard and hand control back to the inline "Play Again" flow.
