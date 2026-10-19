@@ -47,3 +47,19 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+/.pythonlibs/
+__pycache__/
+.pytest_cache/
+
+# Casino bot runtime state can contain balances, payment IDs, and audit records.
+/casino_bot/casino_data.json
+/casino_bot/critical_data.json
+/casino_bot/balances_backup.json
+/casino_bot/processed_payments.json
+/casino_bot/processed_deposit_txids.json
+/casino_bot/transaction_log.json
+/casino_bot/audit_log.json
+/casino_bot/tip_system.db
+/casino_bot/.bot_config
+/casino_bot/emergency_*.json
+/casino_bot/user_data_export_*.json
